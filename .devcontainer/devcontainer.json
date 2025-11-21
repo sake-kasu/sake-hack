@@ -1,0 +1,27 @@
+{
+  "name": "sake-hack-backend",
+  "dockerComposeFile": "./compose.yml",
+  "service": "sake-hack-backend",
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "esbenp.prettier-vscode",
+        "golang.Go",
+        "eamodio.gitlens",
+        "mhutchie.git-graph",
+        "usernamehw.errorlens",
+        "shardulm94.trailing-spaces",
+        "anthropic.claude-code",
+        "42crunch.vscode-openapi",
+        "arjun.swagger-viewer",
+        "saoudrizwan.claude-dev"
+      ]
+    },
+    "settings": {
+      "terminal.integrated.defaultProfile.linux": "zsh"
+    }
+  },
+  "postCreateCommand": "chmod +x /workspace/.devcontainer/setup.sh && /workspace/.devcontainer/setup.sh",
+  "remoteUser": "node"
+}

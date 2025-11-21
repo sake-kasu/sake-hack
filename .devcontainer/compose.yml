@@ -1,0 +1,29 @@
+services:
+  sake-hack-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sake-hack-backend
+    volumes:
+      - type: bind
+        source: ../
+        target: /workspace
+      - type: bind
+        source: ~/.aws
+        target: /home/node/.aws
+        read_only: true
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    working_dir: /workspace
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    command: sleep infinity
+    networks:
+      sake_hack_network:
+    ports:
+      - "8080:8080"
+
+networks:
+  sake_hack_network:
+    external: true
