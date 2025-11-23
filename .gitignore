@@ -45,3 +45,6 @@ logs/
 .env.local
 
 api/openapi.bundled.yaml
+
+# Security scan reports
+gosec-report.json

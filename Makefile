@@ -58,9 +58,50 @@ lint: ## リンターを実行
 	@echo "🔍 リンターを実行しています..."
 	@golangci-lint run --timeout=5m ./...
 
-gosec-scan: ## セキュリティスキャナーを実行
-	@echo "🔒 セキュリティスキャンを実行しています..."
-	@gosec -include=G109,G115 ./...
+gosec-install: ## Gosecのインストール
+	@echo "Installing gosec..."
+	@go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+gosec-scan: gosec-install ## セキュリティスキャナーを実行
+	@echo "🔍 Gosec セキュリティスキャンを実行中..."
+	@rm -f gosec-report.json
+	@gosec -fmt json -out gosec-report.json \
+		-exclude-dir=.git \
+		-exclude-dir=.go \
+		-exclude-dir=vendor \
+		-exclude-dir=generated \
+		-exclude-generated \
+		-tests=false \
+		-concurrency=4 \
+		-severity=high \
+		./...; \
+	GOSEC_EXIT_CODE=$$?; \
+	if [ -f gosec-report.json ]; then \
+		if command -v jq >/dev/null 2>&1; then \
+			ISSUE_COUNT=$$(jq '.Stats.found // 0' gosec-report.json); \
+		else \
+			ISSUE_COUNT=$$(grep -o '"found": [0-9]*' gosec-report.json | grep -o '[0-9]*' || echo "0"); \
+		fi; \
+		if [ "$$ISSUE_COUNT" -gt 0 ]; then \
+			echo ""; \
+			echo "❌ セキュリティ上の問題が $$ISSUE_COUNT 件検出されました"; \
+			echo ""; \
+			echo "📋 検出された問題:"; \
+			if command -v jq >/dev/null 2>&1; then \
+				jq -r '.Issues[] | "  [\(.severity)] \(.file):\(.line) - \(.details)"' gosec-report.json; \
+			else \
+				cat gosec-report.json; \
+			fi; \
+			echo ""; \
+			echo "📄 詳細レポート: gosec-report.json"; \
+			exit 1; \
+		else \
+			echo "✅ セキュリティ上の問題は検出されませんでした"; \
+		fi \
+	else \
+		echo "✅ セキュリティ上の問題は検出されませんでした"; \
+		exit $$GOSEC_EXIT_CODE; \
+	fi
 
 # 依存関係
 deps: ## 依存関係を整理
