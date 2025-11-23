@@ -1,0 +1,159 @@
+SakeType:
+  type: object
+  required:
+    - id
+    - name
+  properties:
+    id:
+      type: integer
+      format: int32
+      description: 酒の種類ID
+    name:
+      type: string
+      description: 酒の種類の名前
+      example: 日本酒
+
+Brewery:
+  type: object
+  required:
+    - id
+    - name
+    - origin_country
+  properties:
+    id:
+      type: integer
+      format: int32
+      description: 酒造ID
+    name:
+      type: string
+      description: 酒造名
+      example: 獺祭
+    origin_country:
+      type: string
+      description: 所在国
+      example: 日本
+    origin_region:
+      type: string
+      nullable: true
+      description: 所在地域
+      example: 山口県
+    latitude:
+      type: number
+      format: double
+      nullable: true
+      description: 緯度
+    longitude:
+      type: number
+      format: double
+      nullable: true
+      description: 経度
+
+DrinkStyle:
+  type: object
+  required:
+    - id
+    - name
+  properties:
+    id:
+      type: integer
+      format: int32
+      description: 飲み方ID
+    name:
+      type: string
+      description: 飲み方の名前
+      example: ストレート
+    description:
+      type: string
+      nullable: true
+      description: 詳細説明
+      example: お酒そのままの味を楽しむ飲み方
+
+Sake:
+  type: object
+  required:
+    - id
+    - type
+    - brewery
+    - name
+    - abv
+    - taste_notes
+    - drink_styles
+    - created_at
+    - updated_at
+  properties:
+    id:
+      type: integer
+      format: int32
+      description: 酒ID
+    type:
+      $ref: '#/SakeType'
+    brewery:
+      $ref: '#/Brewery'
+    name:
+      type: string
+      description: 酒名
+      example: 獺祭 純米大吟醸 磨き二割三分
+    abv:
+      type: number
+      format: float
+      description: アルコール度数(%)
+      example: 16.0
+    taste_notes:
+      type: string
+      description: 味の特徴
+      example: フルーティーで華やかな香り
+    memo:
+      type: string
+      nullable: true
+      description: 感想
+    drink_styles:
+      type: array
+      items:
+        $ref: '#/DrinkStyle'
+      description: おすすめの飲み方
+    created_at:
+      type: string
+      format: date-time
+      description: 作成日時
+    updated_at:
+      type: string
+      format: date-time
+      description: 更新日時
+
+SakeListMeta:
+  type: object
+  required:
+    - total
+    - offset
+    - limit
+  properties:
+    total:
+      type: integer
+      format: int64
+      description: 総件数
+      example: 100
+    offset:
+      type: integer
+      format: int32
+      description: スキップした件数
+      example: 0
+    limit:
+      type: integer
+      format: int32
+      description: 取得した件数
+      example: 20
+
+ListSakesResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Sake'
+      description: 酒のリスト
+    meta:
+      $ref: '#/SakeListMeta'
+    errors:
+      type: array
+      items:
+        $ref: './common.yaml#/APIError'

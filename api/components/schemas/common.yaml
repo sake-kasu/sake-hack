@@ -1,0 +1,84 @@
+HealthResponse:
+  type: object
+  required:
+    - status
+    - timestamp
+  properties:
+    status:
+      type: string
+      example: ok
+      description: サーバーの状態
+    timestamp:
+      type: string
+      format: date-time
+      example: "2025-11-22T10:00:00Z"
+      description: チェック時刻
+    database:
+      type: object
+      properties:
+        postgres:
+          type: string
+          example: ok
+        mysql:
+          type: string
+          example: ok
+        valkey:
+          type: string
+          example: ok
+
+APIError:
+  type: object
+  required:
+    - code
+    - message
+  properties:
+    code:
+      type: string
+      description: エラーコード
+      example: FUNC-001_001
+    message:
+      type: string
+      description: エラーメッセージ
+      example: サンプルエラーメッセージ
+
+ErrorResponse:
+  type: object
+  properties:
+    data:
+      type: object
+      nullable: true
+      description: レスポンスデータ
+    errors:
+      type: array
+      items:
+        $ref: "#/APIError"
+      description: エラー情報の配列
+
+PaginationMeta:
+  type: object
+  required:
+    - total
+    - page
+    - per_page
+    - total_pages
+  properties:
+    total:
+      type: integer
+      format: int64
+      description: 総件数
+      example: 100
+    page:
+      type: integer
+      format: int32
+      description: 現在のページ番号
+      example: 1
+    per_page:
+      type: integer
+      format: int32
+      description: 1ページあたりの件数
+      example: 20
+    total_pages:
+      type: integer
+      format: int32
+      description: 総ページ数
+      example: 5
