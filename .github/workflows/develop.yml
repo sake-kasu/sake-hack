@@ -1,0 +1,340 @@
+name: Develop Branch Pipeline
+
+on:
+  push:
+    branches:
+      - develop
+
+env:
+  GO_VERSION: "1.25.4"
+  COVERAGE_THRESHOLD: "80"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/app
+
+jobs:
+  # ===== BUILD & PUSH DOCKER IMAGE =====
+  build-and-push-image:
+    name: Build & Push Docker Image (Develop)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=develop
+            type=raw,value=daily
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/app/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image pushed successfully
+        run: |
+          echo "✅ イメージをContainer Registryにプッシュしました"
+          echo "pushed tags:"
+          echo "${{ steps.meta.outputs.tags }}"
+
+  # ===== TEST JOBS =====
+  test-unit:
+    name: Unit Tests (Develop)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run unit tests
+        run: |
+          make test-unit
+          echo "✅ developブランチの単体テストが成功しました"
+
+  test-integration:
+    name: Integration Tests & Coverage (Develop)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_DB: sake_hack_app_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: sake_hack_app_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TESTCONTAINERS_HOST_OVERRIDE: localhost
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install gocover-cobertura
+        run: go install github.com/boumenot/gocover-cobertura@latest
+
+      - name: Run integration tests
+        run: make test-integration
+
+      - name: Generate coverage report
+        run: |
+          make cover
+          go tool cover -func=coverage.out
+          gocover-cobertura < coverage.out > coverage.xml
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "developブランチのカバレッジ: ${COVERAGE}%"
+
+          if [ -n "$COVERAGE" ]; then
+            COVERAGE_NUM=$(echo "$COVERAGE" | sed 's/%//')
+            THRESHOLD=${{ env.COVERAGE_THRESHOLD }}
+
+            if (( $(echo "$COVERAGE_NUM < $THRESHOLD" | bc -l) )); then
+              echo "⚠️  カバレッジが ${THRESHOLD}% を下回っています (現在: ${COVERAGE}%)"
+            else
+              echo "✅ カバレッジ要件を満たしています (${COVERAGE}%)"
+            fi
+          fi
+
+          echo "✅ developブランチの統合テストとカバレッジ測定が成功しました"
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-develop
+          path: |
+            coverage.html
+            coverage.out
+            coverage.xml
+          retention-days: 7
+
+  # ===== DOCUMENTATION GENERATION =====
+  generate-api-docs:
+    name: Generate API Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Redocly CLI
+        run: npm install -g @redocly/cli
+
+      - name: Generate API documentation
+        run: |
+          mkdir -p api-output
+          redocly build-docs api/openapi.yaml -o api-output/index.html
+          echo "✅ APIドキュメントを生成しました"
+
+      - name: Upload API docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-docs
+          path: api-output/
+          retention-days: 7
+
+  # ===== GITHUB PAGES DEPLOYMENT =====
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [test-integration, generate-api-docs]
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports-develop
+          path: coverage-reports/
+
+      - name: Download API docs
+        uses: actions/download-artifact@v4
+        with:
+          name: api-docs
+          path: api-docs/
+
+      - name: Setup Pages directory
+        run: |
+          mkdir -p public/api public/coverage
+          cp -r api-docs/* public/api/
+          cp coverage-reports/coverage.html public/coverage/index.html
+
+      - name: Create index page
+        run: |
+          cat <<EOF > public/index.html
+          <!DOCTYPE html>
+          <html lang="ja">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>sake-hack-backend ドキュメント</title>
+            <style>
+              :root {
+                --primary-color: #007bff;
+                --primary-hover: #0056b3;
+                --background: #f8f9fa;
+                --card-bg: #ffffff;
+                --text-color: #333333;
+              }
+
+              @media (prefers-color-scheme: dark) {
+                :root {
+                  --primary-color: #339af0;
+                  --primary-hover: #1c7ed6;
+                  --background: #1e1e1e;
+                  --card-bg: #2c2c2c;
+                  --text-color: #eeeeee;
+                }
+              }
+
+              body {
+                font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                background: var(--background);
+                color: var(--text-color);
+                margin: 0;
+                padding: 1rem;
+              }
+
+              .container {
+                max-width: 800px;
+                margin: 0 auto;
+                background: var(--card-bg);
+                border-radius: 12px;
+                box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+                padding: 2rem;
+              }
+
+              h1 {
+                text-align: center;
+                color: var(--text-color);
+                font-size: 1.8rem;
+                margin-bottom: 2rem;
+              }
+
+              ul {
+                list-style: none;
+                padding: 0;
+                margin: 0;
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 1rem;
+              }
+
+              a {
+                display: flex;
+                align-items: center;
+                text-decoration: none;
+                background-color: var(--primary-color);
+                color: white;
+                padding: 1rem;
+                border-radius: 8px;
+                font-size: 1.1rem;
+                transition: background-color 0.2s ease-in-out;
+              }
+
+              a:hover {
+                background-color: var(--primary-hover);
+              }
+
+              .emoji {
+                font-size: 1.5rem;
+                margin-right: 0.75rem;
+              }
+
+              @media (min-width: 600px) {
+                ul {
+                  grid-template-columns: 1fr 1fr;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>sake-hack-backend ドキュメント</h1>
+              <ul>
+                <li>
+                  <a href="./api/index.html">
+                    <span class="emoji">📚</span>API仕様書 (Redocly)
+                  </a>
+                </li>
+                <li>
+                  <a href="./coverage/index.html">
+                    <span class="emoji">📊</span>テストカバレッジレポート
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Deployment success
+        run: |
+          echo "✅ GitHub Pagesへのデプロイが完了しました"
+          echo "URL: ${{ steps.deployment.outputs.page_url }}"

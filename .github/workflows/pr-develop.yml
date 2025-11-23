@@ -1,0 +1,438 @@
+name: PR to Develop Pipeline
+
+on:
+  pull_request:
+    branches:
+      - develop
+
+env:
+  GO_VERSION: "1.25.4"
+  GOLANGCI_LINT_VERSION: "v2.2.1"
+  COVERAGE_THRESHOLD: "80"
+
+jobs:
+  # ===== FILE CHANGES DETECTION =====
+  changes:
+    name: Detect File Changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      docker: ${{ steps.filter.outputs.docker }}
+      go: ${{ steps.filter.outputs.go }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Check for file changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'api/**'
+              - 'api/oapi-codegen*.yaml'
+            docker:
+              - 'docker/**'
+              - 'Makefile'
+              - 'go.mod'
+              - 'go.sum'
+              - 'cmd/**'
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+
+  # ===== VALIDATE JOBS =====
+  validate-api-spec:
+    name: Validate OpenAPI Spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install Redocly CLI
+        run: npm install -g @redocly/cli
+
+      - name: Validate OpenAPI spec
+        run: |
+          redocly lint api/openapi.yaml
+          echo "✅ OpenAPI仕様が正常です"
+
+  validate-go-modules:
+    name: Validate Go Modules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify Go modules
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "❌ go.modまたはgo.sumが古くなっています。go mod tidyを実行してください" && exit 1)
+          echo "✅ Go modules の依存関係が正常です"
+
+  validate-generated-code:
+    name: Validate Generated Code
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.api == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: |
+          npm install -g @redocly/cli
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+
+      - name: Generate code
+        run: make api-generate
+
+      - name: Check generated code is up-to-date
+        run: |
+          git diff --exit-code generated/ || (echo "❌ 生成コードが最新ではありません。make api-generateを実行してください" && exit 1)
+          echo "✅ 生成コードが最新です"
+
+  # ===== BUILD JOBS =====
+  build-binary:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    needs: [validate-go-modules]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build binary
+        run: |
+          make build
+          echo "✅ バイナリのビルドが成功しました"
+          ls -la bin/
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: sake-hack-server-binary
+          path: bin/
+          retention-days: 1
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.docker == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/app/Dockerfile
+          push: false
+          tags: sake-hack-server:pr-${{ github.event.pull_request.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build success
+        run: echo "✅ Dockerイメージのビルドが成功しました"
+
+  # ===== TEST JOBS =====
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: [validate-go-modules]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run unit tests
+        run: |
+          make test-unit
+          echo "✅ 単体テストが成功しました"
+
+  test-integration:
+    name: Integration Tests & Coverage
+    runs-on: ubuntu-latest
+    needs: [validate-go-modules]
+    services:
+      postgres:
+        image: postgis/postgis:18-3.5
+        env:
+          POSTGRES_DB: sake_hack_app_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: sake_hack_app_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      TESTCONTAINERS_HOST_OVERRIDE: localhost
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install gocover-cobertura
+        run: go install github.com/boumenot/gocover-cobertura@latest
+
+      - name: Run integration tests
+        run: make test-integration
+
+      - name: Generate coverage report
+        run: |
+          make cover
+          go tool cover -func=coverage.out
+          gocover-cobertura < coverage.out > coverage.xml
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "現在のカバレッジ: ${COVERAGE}%"
+
+          if [ -n "$COVERAGE" ]; then
+            COVERAGE_NUM=$(echo "$COVERAGE" | sed 's/%//')
+            THRESHOLD=${{ env.COVERAGE_THRESHOLD }}
+
+            if (( $(echo "$COVERAGE_NUM < $THRESHOLD" | bc -l) )); then
+              echo "⚠️  カバレッジが ${THRESHOLD}% を下回っています (現在: ${COVERAGE}%)"
+            else
+              echo "✅ カバレッジ要件を満たしています (${COVERAGE}%)"
+            fi
+          fi
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage-reports
+          path: |
+            coverage.html
+            coverage.out
+            coverage.xml
+          retention-days: 7
+
+      - name: Comment coverage on PR
+        uses: actions/github-script@v8
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            const coverage = fs.readFileSync('coverage.out', 'utf8');
+            const totalLine = coverage.split('\n').find(line => line.includes('total:'));
+            const match = totalLine ? totalLine.match(/(\d+\.\d+)%/) : null;
+            const coveragePercent = match ? match[1] : 'N/A';
+
+            const body = `## 📊 テストカバレッジ\n\n- **カバレッジ**: ${coveragePercent}%\n- **閾値**: ${{ env.COVERAGE_THRESHOLD }}%\n\n[詳細レポートを確認](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ===== QUALITY JOBS =====
+  lint:
+    name: Lint Check
+    runs-on: ubuntu-latest
+    needs: [validate-go-modules]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin ${{ env.GOLANGCI_LINT_VERSION }}
+          golangci-lint --version
+
+      - name: Run lint
+        run: |
+          make lint
+          echo "✅ リント(フォーマット・静的解析)が成功しました"
+
+  # ===== SECURITY JOBS =====
+  gosec-scan:
+    name: Gosec Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run Gosec scan
+        run: make gosec-scan
+
+      - name: Upload Gosec report
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: gosec-report
+          path: gosec-report.json
+          retention-days: 7
+
+  gitleaks-scan:
+    name: Secret Detection (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+
+  govulncheck:
+    name: Vulnerability Scan (govulncheck)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: |
+          govulncheck ./...
+          echo "✅ 依存関係の脆弱性スキャンが完了しました"
+
+  license-check:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@latest
+
+      - name: Check licenses
+        run: |
+          echo "使用ライブラリのライセンス情報を取得中..."
+          go-licenses csv ./... > licenses.csv || true
+
+          if [ -f licenses.csv ]; then
+            echo "✅ ライセンス情報の取得が完了しました"
+            echo "検出されたライセンス:"
+            cat licenses.csv
+
+            if grep -i "gpl\|copyleft" licenses.csv; then
+              echo "⚠️ GPL系ライセンスが検出されました。ライセンス適合性を確認してください"
+            fi
+          else
+            echo "⚠️ ライセンス情報を取得できませんでした"
+          fi
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: licenses-report
+          path: licenses.csv
+          retention-days: 7
+
+  hadolint-scan:
+    name: Dockerfile Security Check
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'Dockerfile')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: Dockerfile
+          format: json
+          output-file: hadolint-report.json
+          no-fail: true
+
+      - name: Upload Hadolint report
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: hadolint-report
+          path: hadolint-report.json
+          retention-days: 7

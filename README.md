@@ -145,6 +145,61 @@ make db-migrate-create NAME=xxx # 新規マイグレーション作成
 make sqlc-generate              # sqlcコード生成
 ```
 
+## CI/CD
+
+### GitHub Actions ワークフロー
+
+#### developへのPR時 (`.github/workflows/pr-develop.yml`)
+
+PR作成時に自動実行されるパイプライン:
+
+- **Validate**: OpenAPI仕様検証、Go modules検証、生成コード検証
+- **Build**: バイナリビルド、Dockerイメージビルド(変更時のみ)
+- **Test**: 単体テスト、統合テスト + カバレッジ測定
+- **Quality**: golangci-lint によるコード品質チェック
+- **Security**:
+  - gosec: Goセキュリティスキャン
+  - gitleaks: シークレット検出
+  - govulncheck: 依存関係の脆弱性スキャン
+  - license-check: ライセンス適合性チェック
+  - hadolint: Dockerfileセキュリティチェック
+
+#### developブランチへのpush時 (`.github/workflows/develop.yml`)
+
+developブランチへのマージ時に自動実行されるパイプライン:
+
+- **Build & Push**: Dockerイメージをビルドし、GitHub Container Registryにプッシュ
+  - タグ: `develop`, `daily`, `sha-<commit-hash>`
+- **Test**: 単体テスト、統合テスト + カバレッジ測定
+- **Documentation**: APIドキュメント生成(Redocly)
+- **Deploy**: GitHub Pagesへドキュメントをデプロイ
+  - API仕様書、テストカバレッジレポート
+
+#### mainブランチへのpush時 (`.github/workflows/main.yml`)
+
+mainブランチへのマージ時に自動実行されるパイプライン:
+
+- **Build & Push**: Dockerイメージをビルドし、GitHub Container Registryにプッシュ
+  - タグ: `main`, `latest`, `sha-<commit-hash>`
+- **Test**: 単体テスト、統合テスト + カバレッジ測定
+
+### 必要な設定
+
+GitHub Actionsを使用するために、以下の設定が必要です:
+
+1. **GitHub Container Registryの有効化**:
+   - リポジトリ設定 → Packages → Container registry を有効化
+   - ワークフローに `packages: write` 権限を付与済み
+
+2. **GitHub Pagesの有効化** (develop用):
+   - リポジトリ設定 → Pages → Source を「GitHub Actions」に設定
+   - developブランチへのpush時に自動デプロイ
+   - 公開URL: `https://<username>.github.io/<repository>/`
+
+3. **カバレッジ閾値の設定** (オプション):
+   - デフォルト: 80%
+   - 変更する場合は、各ワークフローの `COVERAGE_THRESHOLD` 環境変数を編集
+
 ## プロジェクト構造
 
 ```
