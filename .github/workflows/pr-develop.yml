@@ -160,7 +160,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./docker/app/Dockerfile
+          file: ./docker/Dockerfile
           push: false
           tags: sake-hack-server:pr-${{ github.event.pull_request.number }}
           cache-from: type=gha
