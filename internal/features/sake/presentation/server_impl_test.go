@@ -178,7 +178,7 @@ func TestListSakes_ValidationError_TypeIdLessThan1(t *testing.T) {
 	router := gin.New()
 	generated.RegisterHandlers(router, server)
 
-	req := httptest.NewRequest(http.MethodGet, "/sakes?type_id=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/sakes?typeId=0", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -195,7 +195,7 @@ func TestListSakes_ValidationError_BreweryIdLessThan1(t *testing.T) {
 	router := gin.New()
 	generated.RegisterHandlers(router, server)
 
-	req := httptest.NewRequest(http.MethodGet, "/sakes?brewery_id=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/sakes?breweryId=0", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -345,7 +345,7 @@ func TestListSakes_BoundaryValue_TypeIdMinimum(t *testing.T) {
 	router := gin.New()
 	generated.RegisterHandlers(router, server)
 
-	req := httptest.NewRequest(http.MethodGet, "/sakes?type_id=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/sakes?typeId=1", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)
@@ -369,7 +369,7 @@ func TestListSakes_BoundaryValue_BreweryIdMinimum(t *testing.T) {
 	router := gin.New()
 	generated.RegisterHandlers(router, server)
 
-	req := httptest.NewRequest(http.MethodGet, "/sakes?brewery_id=1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/sakes?breweryId=1", nil)
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)

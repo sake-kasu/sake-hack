@@ -28,7 +28,7 @@ get:
         maximum: 100
         x-oapi-codegen-extra-tags:
           validate: "omitempty,min=1,max=100"
-    - name: type_id
+    - name: typeId
       in: query
       description: 酒の種類IDでフィルタ
       required: false
@@ -38,7 +38,7 @@ get:
         minimum: 1
         x-oapi-codegen-extra-tags:
           validate: "omitempty,min=1"
-    - name: brewery_id
+    - name: breweryId
       in: query
       description: 酒造IDでフィルタ
       required: false

@@ -59,8 +59,8 @@ PaginationMeta:
   required:
     - total
     - page
-    - per_page
-    - total_pages
+    - perPage
+    - totalPages
   properties:
     total:
       type: integer
@@ -72,12 +72,12 @@ PaginationMeta:
       format: int32
       description: 現在のページ番号
       example: 1
-    per_page:
+    perPage:
       type: integer
       format: int32
       description: 1ページあたりの件数
       example: 20
-    total_pages:
+    totalPages:
       type: integer
       format: int32
       description: 総ページ数
